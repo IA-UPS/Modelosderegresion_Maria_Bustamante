@@ -1,0 +1,799 @@
+---
+title: "Predicción de la diabetes "
+format: html
+editor: visual
+author: "Edmond Géraud"
+---
+
+**Integrentes:** María José Bustamante / Nicolás Jadán
+
+# Intro
+
+*Nota: En este repaso se agregaron comentarios que hacen referencia a lo que se entendió de cada código, aquellos sin comentarios signifcan que esa parte está entendida y no hay dudas.*
+
+Este sería un ejemplo de examen El siguiente conjunto de datos, consuste en predecir a pacientes basandonos en datos clínicos, si puede padecer diabetes o no.
+
+Antes de cualquier método de clasificación, regresión o lo que sea, necesitamos explorar los datos.
+
+Esto supone exámenes estadísticos inferenciales univariantes, bivariantes y multivariantes.
+
+# Pima Indians Diabetes Database
+
+This dataset is originally from the National Institute of Diabetes and Digestive and Kidney Diseases. The objective of the dataset is to diagnostically predict whether or not a patient has diabetes, based on certain diagnostic measurements included in the dataset. Several constraints were placed on the selection of these instances from a larger database. In particular, all patients here are females at least 21 years old of Pima Indian heritage.
+
+# Cargamos librerias
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(e1071)
+library(ggstatsplot)
+```
+
+# Cargamos los datos
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+head(datos)
+```
+
+Si echamos una búsqueda rápida en google, observamos que el pedigree, es eso, la historia familiar de diabetes. Por lo tanto, aquí podríamso hacer varias cosas ! Entre ellas, regresar los datos a dicha función, o clasificar según esta variable, considerarla o no considerarla.
+
+Para empezar vamos a considerarla para ver la clasificación del modelo knn y bayes.
+
+## Miramos las clases de los datos
+
+```{r}
+str(datos)
+```
+
+La única variable que debemos de cambiar es `Outcome` a factor. Donde 1 es diebetes, y 0 es no diabetes
+
+```{r}
+datos$Outcome  <- as.factor(datos$Outcome)
+```
+
+# Análisis estadístico preliminar
+
+```{r}
+dim(datos)
+```
+
+Tenemos 768 filas y 9 columnas. Analicemos primero dos a dos las variables una por una
+
+### Histogramas
+
+```{r}
+
+l.plots <- vector("list",length = ncol(datos)-1)
+n1 <- ncol(datos) -1
+for(j in 1:n1){
+  
+  h <-hist(datos[,j],plot = F)
+  datos.tmp <- data.frame(value=datos[,j],outcome=datos$Outcome)
+  p1 <- ggplot(datos.tmp,aes(value,fill=outcome))+geom_histogram(breaks=h$breaks) + ggtitle(paste("Histogram of", colnames(datos)[j]))
+  
+  l.plots[[j]] <- p1
+}
+
+
+```
+
+[**COMENTARIO:**]{.underline}
+
+En este código se crea un objeto llamado "datos.tmp" que contiene dos columnas: "value" y "outcome". La columna "value" contiene los valores de la columna "j" y la columna "outcome" contiene los valores de la columna "Outcome" del archivo "datos".
+
+Cuando el bucle termina la lista "l.plots" contiene los gráficos de histograma generados para cada columna de "datos" (excepto la columna "Outcome").
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+l.plots
+```
+
+En lo particular la variable del pedigree se me hace importante, entonces vamos a realizar gráficos de dispersión
+
+En realidad, una buena práctica es correlacionar todas contra todas...
+
+```{r}
+ggscatterstats(datos,BMI,DiabetesPedigreeFunction)
+```
+
+Sin embargo, esto puede ser un proceso tedioso... imaginad hacer 16 gráficas ! podemos condersarlo todo
+
+```{r}
+obj.cor <- psych::corr.test(datos[,1:n1])
+p.values <- obj.cor$p
+p.values[upper.tri(p.values)] <- obj.cor$p.adj
+p.values[lower.tri(p.values)] <- obj.cor$p.adj
+diag(p.values) <- 1
+corrplot::corrplot(corr = obj.cor$r,p.mat = p.values,sig.level = 0.05,insig = "label_sig")
+```
+
+[**COMENTARIO:**]{.underline}
+
+La fución corr.test realiza una prueba de correlación en la que se utilizarán las columnas del conjunto de datos desde la primera columna hasta la n1.
+
+Upper: Se utiliza para actualizar los valores de p en la parte superior de la matriz "p.values" con los valores ajustados obtenidos de "obj.cor\$p.adj".
+
+**`upper.tri(p.values)`** devuelve una matriz booleana con el mismo tamaño que "p.values", donde los elementos correspondientes a la parte superior de la matriz tienen el valor **`TRUE`** y los elementos correspondientes a la parte inferior y diagonal principal tienen el valor **`FALSE`**
+
+La función **`corrplot`** del paquete "corrplot" genera un gráfico de matriz de correlación. En la que:
+
+-   **`corr`**: La matriz de correlación obtenida a partir de "obj.cor\$r".
+
+-   **`p.mat`**: La matriz de valores de p ajustados obtenida anteriormente.
+
+-   **`sig.level`**: El nivel de significancia utilizado para determinar qué correlaciones se consideran significativas. En este caso, se establece en 0.05, lo que significa que solo se mostrarán en el gráfico las correlaciones con valores de p menores a 0.05.
+
+En p.values se guardan los valores de p obtenidos de la prueba de correlación realizada.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Ahora podemos proceder a hacer algo similar, con una serie de comparaciones dos a dos sobre las medias o medianas, sobre cada variable y la variable de interés.
+
+Primero debemos aplicar una regresión linear con variable dependiente cada variable numérica y por la categórica. Es decir un t.test pero con el fin de ver los residuos, para ver la normalidad de éstos
+
+```{r}
+p.norm <- apply(apply(datos[,1:n1],
+            2,
+            function(x) summary(lm(x~datos$Outcome))$residuals),
+      2,
+      shapiro.test)
+
+p.norm
+```
+
+[**COMENTARIO:**]{.underline}
+
+La función proporcionada ajusta un modelo de regresión lineal donde "x" es cada columna de datos y "datos\$Outcome" es la variable de respuesta. Luego, se extraen los residuos del modelo usando: **`summary(lm(x~datos$Outcome))$residuals`**. Esto devuelve una matriz donde cada columna contiene los residuos del modelo ajustado para cada columna de datos.
+
+El vector p.norm contiene los valores de p de las pruebas de normalidad realizadas con los residuos de cada modelo.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Todas las variables son no normales, tal como vemos en los histogramas.
+
+```{r}
+ggbetweenstats(datos,Outcome,Pregnancies,type = "nonparametric")
+```
+
+```{r}
+ggbetweenstats(datos,Outcome,Glucose,type = "nonparametric")
+```
+
+```{r}
+ggbetweenstats(datos,Outcome,BloodPressure,type = "nonparametric")
+
+```
+
+```{r}
+ggbetweenstats(datos,Outcome,Insulin,type = "nonparametric")
+```
+
+```{r}
+ggbetweenstats(datos,Outcome,BMI,type = "nonparametric")
+
+```
+
+```{r}
+ggbetweenstats(datos,Outcome,DiabetesPedigreeFunction,type = "nonparametric")
+
+```
+
+```{r}
+ggbetweenstats(datos,Outcome,Age,type = "nonparametric")
+```
+
+### PCA
+
+```{r}
+summary(datos)
+pcx <- prcomp(datos[,1:n1],scale. = F) ## escalamos por la variablidad de los datos
+
+plotpca <- bind_cols(pcx$x,outcome=datos$Outcome)
+ggplot(plotpca,aes(PC1,PC2,color=outcome))+geom_point()
+```
+
+[**COMENTARIO:**]{.underline}
+
+La función **`prcomp`** se utiliza para calcular las componentes principales. El argumento **`scale. = F`** indica que no se deben escalar los datos por la variabilidad.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Ahora vamos a ver si haciendo unas transformaciones esto cambia. Pero antes debemos de ver las variables sospechosas...
+
+Pero de igual manera podemos escalar a ver si hay algun cambio...
+
+```{r}
+summary(datos)
+pcx <- prcomp(datos[,1:n1],scale. = T) ## escalamos por la variablidad de los datos
+
+plotpca <- bind_cols(pcx$x,outcome=datos$Outcome)
+ggplot(plotpca,aes(PC1,PC2,color=outcome))+geom_point()
+```
+
+```{r}
+factoextra::fviz_contrib(pcx,"var")
+```
+
+[**COMENTARIO:**]{.underline}
+
+La función **`fviz_contrib`** calcula y visualiza las contribuciones de las variables a las componentes principales. Esto se hace a través de un gráfico de barras, donde cada barra representa la contribución relativa de una variable a cada componente principal.
+
+Este código indica cómo cada variable influye en la estructura de las componentes principales y ayuda a identificar qué variables tienen un mayor impacto en la variabilidad capturada por el PCA.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Al parecer es la insulina la que está dando problemas
+
+```{r}
+## indices a quitar
+w <- c(grep("insulin",ignore.case = T,colnames(datos)),ncol(datos))
+pcx <- prcomp(datos[,-w],scale. = F) ## escalamos por la variablidad de los datos
+
+plotpca <- bind_cols(pcx$x,outcome=datos$Outcome)
+ggplot(plotpca,aes(PC1,PC2,color=outcome))+geom_point()
+```
+
+[**COMENTARIO:**]{.underline}
+
+**`grep`** se utiliza para buscar las columnas del objeto "datos" que contengan la cadena de caracteres "insulin", ignorando la distinción entre mayúsculas y minúsculas (**`ignore.case = TRUE`**). Las columnas que coincidan se agregan al vector "w".
+
+Este código realiza un PCA en el conjunto de datos, excluyendo las columnas que contienen la cadena "insulin" en su nombre. Luego, visualiza las dos primeras componentes principales en un gráfico de dispersión, donde los puntos se colorearán según los valores de la variable "Outcome"
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+De hecho la insulina, tenía un aspecto raro, como sesgado, ver gráficos de arriba. Vamos a transformala...
+
+```{r}
+datos$Insulin  <- log(datos$Insulin+0.05)
+
+summary(datos)
+pcx <- prcomp(datos[,1:n1],scale. = T) ## escalamos por la variablidad de los datos
+
+plotpca <- bind_cols(pcx$x,outcome=datos$Outcome)
+ggplot(plotpca,aes(PC1,PC2,color=outcome))+geom_point()
+```
+
+[**COMENTARIO:**]{.underline}
+
+**`datos$Insulin <- log(datos$Insulin+0.05)`** calcula el logaritmo natural (base e) de la variable "Insulin"y lo asigna nuevamente a la misma columna . Se agrega 0.05 al valor original antes de aplicar el logaritmo para evitar problemas con valores cercanos a cero.
+
+Este código realiza una transformación logarítmica en la variable "Insulin" y luego realiza un PCA en las columnas de datos transformadas. Luego, visualiza las dos primeras componentes principales en un gráfico de dispersión, donde los puntos se colorearán según los valores de la variable "Outcome".
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Cambia ! Esto significa que no hemos quitado la infromacion de la insulina, solamente lo hemos transformado
+
+Es decir, cambia si transformamos los datos...a partir de esto, podemos realizar de nuevo pruebas de diferencia de medianas, pero ahora lo veremos condensado..
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+datos$Outcome <- as.factor(datos$Outcome)
+datsc <- scale(datos[,-ncol(datos)])
+```
+
+Veamos las distribuciones de nuevo....
+
+```{r}
+l.plots <- vector("list",length = ncol(datos)-1)
+n1 <- ncol(datos) -1
+for(j in 1:n1){
+  
+  h <-hist(datos[,j],plot = F)
+  datos.tmp <- data.frame(value=datos[,j],outcome=datos$Outcome)
+  p1 <- ggplot(datos.tmp,aes(value,fill=outcome))+geom_histogram(breaks=h$breaks) + ggtitle(paste("Histogram of", colnames(datos)[j]))
+  
+  l.plots[[j]] <- p1
+}
+l.plots
+```
+
+Curioso, los valores la insulina, han cambiado por la transformación en valor mas no la distribución, vamos a hacer unos arrelgos...
+
+Al parecer la preñanza esta ligada a una esgala logaritmica de 2 Esto es otra cosa...
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+datos$Outcome <- as.factor(datos$Outcome)
+datos$Pregnancies  <- log(datos$Pregnancies+0.5)
+ggplot(datos,aes(Pregnancies))+geom_histogram(breaks = hist(datos$Pregnancies,plot=F)$breaks)
+```
+
+[**COMENTARIO:**]{.underline}
+
+Aquí unicamente se agrega una tranformación logarítmica a "Pregnancies" y se realiza un diagrama de barras.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Realizaremos lo mismo con la grosura de la piel
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+datos$Outcome <- as.factor(datos$Outcome)
+datos$SkinThickness  <- log(datos$SkinThickness+0.5)
+ggplot(datos,aes(SkinThickness))+geom_histogram(breaks = hist(datos$SkinThickness,plot=F)$breaks)
+```
+
+Tenemos algo raro, lo más posible sea por la obesidad...
+
+```{r}
+ggscatterstats(datos,SkinThickness,BMI)
+```
+
+[**COMENTARIO:**]{.underline} Cada punto en el gráfico representa una observación en el conjunto de datos, y la posición del punto en el eje x corresponde al valor de "SkinThickness", mientras que la posición en el eje y corresponde al valor de "BMI".
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Curioso ! al parecer los datos tienen valores nulos, los cuales solo están en las otras variables que no sean pregnancies. Vamos a quitarlos...
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+datos[,-c(1,9)] <- apply(datos[,-c(1,9)],2,function(x) ifelse(x==0,NA,x))
+
+datos$Outcome <- as.factor(datos$Outcome)
+```
+
+[**COMENTARIO:**]{.underline} Se utiliza **`ifelse`** para reemplazar los valores iguales a cero por **`NA`** (valores perdidos), y mantener los demás valores sin cambios.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+### vamos a quitar estos valores
+
+```{r}
+datos <- datos[complete.cases(datos),]
+```
+
+Se redujo el data set a 392 observaciones...
+
+```{r}
+table(datos$Outcome)
+```
+
+```{r}
+
+l.plots <- vector("list",length = ncol(datos)-1)
+n1 <- ncol(datos) -1
+for(j in 1:n1){
+  
+  h <-hist(datos[,j],plot = F)
+  datos.tmp <- data.frame(value=datos[,j],outcome=datos$Outcome)
+  p1 <- ggplot(datos.tmp,aes(value,fill=outcome))+geom_histogram(breaks=h$breaks) + ggtitle(paste("Histogram of", colnames(datos)[j]))
+  
+  l.plots[[j]] <- p1
+}
+l.plots
+```
+
+Ahora si podemos realizar las transfomraciones
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+datos[,-c(1,9)] <- apply(datos[,-c(1,9)],2,function(x) ifelse(x==0,NA,x))
+datos <- datos[complete.cases(datos),]
+
+datos$Outcome <- as.factor(datos$Outcome)
+datos$Insulin <- log(datos$Insulin)
+datos$Pregnancies <- log(datos$Pregnancies+0.5)
+datos$DiabetesPedigreeFunction <- log(datos$DiabetesPedigreeFunction)
+
+datos$SkinThickness <- sqrt((datos$SkinThickness))
+datos$Glucose <- log(datos$Glucose)
+datos$Age <-log2(datos$Age)
+l.plots <- vector("list",length = ncol(datos)-1)
+n1 <- ncol(datos) -1
+for(j in 1:n1){
+  
+  h <-hist(datos[,j],plot = F)
+  datos.tmp <- data.frame(value=datos[,j],outcome=datos$Outcome)
+  p1 <- ggplot(datos.tmp,aes(value,fill=outcome))+geom_histogram(breaks=h$breaks) + ggtitle(paste("Histogram of", colnames(datos)[j]))
+  
+  l.plots[[j]] <- p1
+}
+l.plots
+```
+
+[**COMENTARIO:**]{.underline}
+
+**`complete.cases`** filtra el objeto "datos" para eliminar las filas que contienen valores (**`NA`**) en alguna columna, es decir se utiliza para determinar si una observación contiene valores completos en todas las columnas. Las filas que cumplen esta condición se mantienen en el objeto "datos".
+
+**`sqrt`** calcula la raíz cuadrada de los valores en la columna "SkinThickness". Puede ser útil para ajustar la distribución de los datos si están sesgados hacia valores más altos.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Con las anteriores transformaciones vamos a realizar el PCA de nuevo.
+
+```{r}
+summary(datos)
+pcx <- prcomp(datos[,1:n1],scale. = T) ## escalamos por la variablidad de los datos
+
+plotpca <- bind_cols(pcx$x,outcome=datos$Outcome)
+ggplot(plotpca,aes(PC1,PC2,color=outcome))+geom_point()
+```
+
+Ahora vamos a realizar las pruebas de medianas
+
+```{r}
+p.norm <- apply(apply(scale(datos[,1:n1]),
+            2,
+            function(x) summary(lm(x~datos$Outcome))$residuals),
+      2,
+      shapiro.test)
+
+p.norm
+```
+
+Hemos conseguido la normalidad en solo dos variables, si fueran mas procederiamos con t test pero como no es asi, con test de Wilcoxon
+
+```{r}
+p.norm <- apply(scale(datos[,1:n1]),
+            2,
+            function(x) wilcox.test(x~datos$Outcome)$p.value)
+```
+
+Observamos que en una primera instancia ahora todas tienen diferencias significativas, esto tenemos que corregir.
+
+```{r}
+p.adj <- p.adjust(p.norm,"BH")
+```
+
+Todas siguen siendo significativas, ahora vamos a ver cuales aumentan o disminyuen respecto las otras
+
+```{r}
+datos.split <- split(datos,datos$Outcome)
+
+datos.median <- lapply(datos.split, function(x) apply(x[,-ncol(x)],2,median))
+
+
+toplot <- data.frame(medianas=Reduce("-",datos.median)
+,p.values=p.adj)
+
+toplot
+```
+
+[**COMENTARIO:**]{.underline}
+
+El código divide el conjunto de datos "datos" en subconjuntos basados en la variable "Outcome", calcula las medianas de cada subconjunto y las diferencias entre las medianas, y luego crea un dataframe que combina estas diferencias y los valores de p-valor ajustados.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Ahora Todos los valores son significativos respecto a la obesidad
+
+```{r}
+obj.cor <- psych::corr.test(datos[,1:n1])
+p.values <- obj.cor$p
+p.values[upper.tri(p.values)] <- obj.cor$p.adj
+p.values[lower.tri(p.values)] <- obj.cor$p.adj
+diag(p.values) <- 1
+corrplot::corrplot(corr = obj.cor$r,p.mat = p.values,sig.level = 0.05,insig = "label_sig")
+```
+
+[**COMENTARIO:**]{.underline}
+
+**`psych::corr.test()`** es una función que realiza pruebas de correlación en los datos. Toma como entrada una matriz o dataframe y calcula varios coeficientes de correlación, como el coeficiente de correlación de Pearson y el coeficiente de correlación de Spearman, junto con sus respectivos valores de p-valor.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+También podemos observar como cambian las relaciones segun la diabetes
+
+```{r}
+obj.cor <- psych::corr.test(datos[datos$Outcome==0,1:n1])
+p.values <- obj.cor$p
+p.values[upper.tri(p.values)] <- obj.cor$p.adj
+p.values[lower.tri(p.values)] <- obj.cor$p.adj
+diag(p.values) <- 1
+corrplot::corrplot(corr = obj.cor$r,p.mat = p.values,sig.level = 0.05,insig = "label_sig")
+```
+
+```{r}
+obj.cor <- psych::corr.test(datos[datos$Outcome==1,1:n1])
+p.values <- obj.cor$p
+p.values[upper.tri(p.values)] <- obj.cor$p.adj
+p.values[lower.tri(p.values)] <- obj.cor$p.adj
+diag(p.values) <- 1
+corrplot::corrplot(corr = obj.cor$r,p.mat = p.values,sig.level = 0.05,insig = "label_sig")
+```
+
+Es decir, existen correlaciones únicas de la obesidad y no obesidad, y existen otras correlaciones que son debidas a otros factores.
+
+# Particion de datos
+
+```{r}
+datos[,1:n1] <- as.data.frame(scale(datos[,-ncol(datos)]))
+levels(datos$Outcome) <- c("D","N")
+train <- sample(nrow(datos),size = nrow(datos)*0.7)
+
+dat.train <- datos[train,]
+dat.test <- datos[-train,]
+```
+
+# Modelado
+
+```{r}
+datos[,1:n1] <- as.data.frame(scale(datos[,-ncol(datos)]))
+
+glm.mod <- glm(Outcome ~.,data=dat.train,family = "binomial")
+
+prediccion <- as.factor(ifelse(predict(glm.mod,dat.test,type="response")>=0.5,"N","D"))
+
+caret::confusionMatrix(prediccion,dat.test$Outcome)
+```
+
+[**COMENTARIO:**]{.underline}
+
+Aquí se realiza un modelo de regresión logística **`Outcome ~ .`** especifica que la variable "Outcome" es la variable de respuesta y todas las demás variables en el dataframe "dat.train" se utilizan como variables predictoras. El argumento **`family = "binomial"`** se utiliza para indicar que se trata de un modelo de regresión logística para datos binarios.
+
+Finalmente se calcula una matriz de confusión para evaluar el rendimiento de las predicciones en comparación con los valores reales.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+RIDGE
+
+```{r}
+tuneGrid=expand.grid(
+              .alpha=0,
+              .lambda=seq(0, 1, by = 0.001))
+trainControl <- trainControl(method = "repeatedcv",
+                       number = 10,
+                       repeats = 3,
+                       # prSummary needs calculated class,
+                       classProbs = T)
+
+model <- train(Outcome ~ ., data = dat.train, method = "glmnet", trControl = trainControl,tuneGrid=tuneGrid,
+                                      metric="Accuracy"
+)
+
+confusionMatrix(predict(model,dat.test[,-ncol(dat.test)]),dat.test$Outcome)
+```
+
+[**COMENTARIO:**]{.underline}
+
+`ecpand.grid` crea una cuadrícula de sintonización para el ajuste del modelo. En este caso, se utiliza el método de regularización "glmnet". Lambda varía de 0 a 1 en incrementos de 0.001. Estos valores se combinan en todas las posibles combinaciones para la sintonización del modelo.
+
+Se utiliza el método de validación cruzada repetida ("repeatedcv") con 10 pliegues y 3 repeticiones. Esto significa que el modelo se entrenará y evaluará en 10 subconjuntos de datos diferentes, repitiendo el proceso 3 veces. La opción **`classProbs = T`** indica que se deben calcular las probabilidades de clase durante el entrenamiento.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+LASSO
+
+```{r}
+tuneGrid=expand.grid(
+              .alpha=1,
+              .lambda=seq(0, 1, by = 0.0001))
+trainControl <- trainControl(method = "repeatedcv",
+                       number = 10,
+                       repeats = 3,
+                       # prSummary needs calculated class,
+                       classProbs = T)
+
+model <- train(Outcome ~ ., data = dat.train, method = "glmnet", trControl = trainControl,tuneGrid=tuneGrid,
+                                      metric="Accuracy"
+)
+
+confusionMatrix(predict(model,dat.test[,-ncol(dat.test)]),dat.test$Outcome)
+```
+
+**COMENTARIO:**
+
+En esta parte se aplica la misma metdología de ridge con la única diferencia que el valor de alpha cambia a 1.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+NAIVE BAYES
+
+```{r}
+datos[,1:n1] <- as.data.frame(scale(datos[,-ncol(datos)]))
+levels(datos$Outcome) <- c("D","N")
+train <- sample(nrow(datos),size = nrow(datos)*0.7)
+
+dat.train <- datos[train,]
+dat.test <- datos[-train,]
+mdl <- naiveBayes(Outcome ~ .,data=dat.train,laplace = 0)
+prediccion <-predict(mdl,dat.test[,-ncol(dat.test)])
+confusionMatrix(prediccion,dat.test$Outcome)
+```
+
+[**COMENTARIO:**]{.underline} **`laplace = 0`** indica que no se debe aplicar el ajuste de Laplace. Este modelo tiene una accuracy del 83% y se establece cómo positivo es decir que hay diabetes.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+lambda_use <- min(model$finalModel$lambda[model$finalModel$lambda >= model$bestTune$lambda])
+position <- which(model$finalModel$lambda == lambda_use)
+featsele <- data.frame(coef(model$finalModel)[, position])
+```
+
+[**COMENTARIO:**]{.underline}
+
+En la primera línea se busca el valor de lambda más pequeño en el modelo ajustado. Este debe ser mayor o igual al valor de lambda óptimo seleccionado durante la sintonización (**`model$bestTune$lambda`**).
+
+Este código extrae los coeficientes correspondientes al valor de lambda utilizado en el modelo final, y los almacena en un dataframe llamado **`featsele`**. Esto para analizar y visualizar los coeficientes de las variables seleccionada.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+rownames(featsele)[featsele$coef.model.finalModel....position.!=0]
+```
+
+[**COMENTARIO:**]{.underline}
+
+Este código devuelve los nombres de las filas que representan las variables en el dataframe **`featsele`** donde los coeficientes del modelo final son diferentes de cero.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+mdl.sel <-naiveBayes(Outcome ~ Insulin+Glucose+DiabetesPedigreeFunction+Age,data = dat.train)
+
+prediccion <- predict(mdl.sel,dat.test[,-ncol(dat.test)])
+
+confusionMatrix(prediccion,dat.test$Outcome)
+```
+
+[**COMENTARIO:**]{.underline}
+
+Se puede observar que este modelo tiene una accuracy del 85%
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+library(ISLR)
+library(caret)
+set.seed(400)
+ctrl <- trainControl(method="repeatedcv",repeats = 3) #,classProbs=TRUE,summaryFunction = twoClassSummary)
+knnFit <- train(Outcome ~ ., data = dat.train, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 50)
+
+#Output of kNN fit
+knnFit
+```
+
+**COMENTARIO:**
+
+Se muestran los resultados del ajuste del modelo para diferentes valores de k (número de vecinos más cercanos considerados). Se informa la precisión y el coeficiente kappa para cada valor de k probado.
+
+La métrica utilizada para seleccionar el modelo óptimo fue la precisión. El modelo con la precisión más alta se seleccionó como el modelo final.
+
+El valor de k seleccionado para el modelo final fue 19, lo que significa que se consideraron los 19 vecinos más cercanos para realizar las predicciones.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+plot(knnFit)
+```
+
+```{r}
+knnPredict <- predict(knnFit,newdata = dat.test[,-ncol(dat.test)] )
+#Get the confusion matrix to see accuracy value and other parameter values
+confusionMatrix(knnPredict, dat.test$Outcome )
+```
+
+[**COMENTARIO:**]{.underline}
+
+Un valor de kappa más cercano a 1 indica un acuerdo sustancial entre las predicciones del modelo y las clases reales. En este caso el valor está alejado a 1.
+
+El código realiza la predicción utilizando el modelo k-NN entrenado y luego utiliza la matriz de confusión para evaluar la precisión y otros parámetros de rendimiento del modelo.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+library(caret)
+datos <- read.csv("./datos/diabetes.csv")
+datos$Outcome <-as.factor(datos$Outcome)
+datos[,1:n1] <- as.data.frame(scale(datos[,-ncol(datos)]))
+levels(datos$Outcome) <- c("D","N")
+train <- sample(nrow(datos),size = nrow(datos)*0.7)
+
+dat.train <- datos[train,]
+dat.test <- datos[-train,]
+set.seed(1001) 
+ctrl<-trainControl(method="repeatedcv",number=10,classProbs = TRUE,summaryFunction = twoClassSummary) 
+plsda<-train(x=dat.train[,-ncol(datos)], # spectral data
+              y=dat.train$Outcome, # factor vector
+              method="pls", # pls-da algorithm
+              tuneLength=10, # number of components
+              trControl=ctrl, # ctrl contained cross-validation option
+              preProc=c("center","scale"), # the data are centered and scaled
+              metric="ROC") # metric is ROC for 2 classes
+plsda
+prediccion <- predict(plsda,newdata = dat.test[,-ncol(datos)])
+
+confusionMatrix(prediccion,dat.test$Outcome)
+```
+
+[**COMENTARIO:**]{.underline}
+
+Antes de ajustar el modelo PLS, los predictores se preprocesan mediante centrado y escalado. El centrado consiste en restar la media de cada variable predictora, mientras que el escalado consiste en dividir por la desviación estándar. Este paso de estandarización garantiza que todas las variables estén en una escala similar, lo que evita que una variable en particular domine el análisis.
+
+El rendimiento del modelo se evalúa en función de distintos parámetros de ajuste, concretamente el número de componentes. Las métricas de evaluación utilizadas son ROC, sensibilidad y especificidad. El ROC se utiliza para problemas de clasificación binaria y proporciona una medida de la capacidad del modelo para discriminar entre las dos clases. El modelo óptimo se selecciona en función del mayor valor ROC, y el número correspondiente de componentes se elige como valor final del modelo.
+
+El modelo PLS alcanzó una precisión de 0,74, que es la proporción de predicciones correctas. El valor Kappa de 0,3833 indica la concordancia entre las predicciones del modelo y las clases verdaderas. La sensibilidad mide la proporción de casos D reales predichos correctamente, mientras que la especificidad mide la proporción de casos N reales predichos correctamente.
+
+En general, el modelo PLS obtuvo un rendimiento moderado, con una sensibilidad destacada (0,87) pero una especificidad inferior (0,48).
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Si tuneamos lambda
+
+```{r}
+datos <- read.csv("./datos/diabetes.csv")
+datos$Outcome <-as.factor(datos$Outcome)
+levels(datos$Outcome) <- c("D","N")
+train <- sample(nrow(datos),size = nrow(datos)*0.7)
+
+dat.train <- datos[train,]
+dat.test <- datos[-train,]
+lambda <- seq(0,50,0.1)
+  
+  modelo <- naiveBayes(dat.train[,-ncol(datos)],dat.train$Outcome)
+  
+  predicciones <- predict(modelo,dat.test[,-ncol(datos)])
+  
+confusionMatrix(predicciones,dat.test$Outcome)$overall[1]
+
+
+
+```
+
+[**COMENTARIO:**]{.underline}
+
+Se crea un vector llamado "lambda" que contiene valores secuenciales de 0 a 50 con incrementos de 0.1.
+
+Este código carga y prepara los datos de diabetes, divide los datos en conjuntos de entrenamiento y prueba, ajusta un modelo de Naive Bayes y genera predicciones utilizando el modelo ajustado. Luego, se evalúa la precisión global del modelo utilizando la matriz de confusión.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+```{r}
+
+datos <- read.csv("./datos/diabetes.csv")
+datos$Outcome <-as.factor(datos$Outcome)
+datos[,1:n1] <- as.data.frame(scale(datos[,-ncol(datos)]))
+levels(datos$Outcome) <- c("D","N")
+train <- sample(nrow(datos),size = nrow(datos)*0.7)
+
+dat.train <- datos[train,]
+dat.test <- datos[-train,]
+library(caret)
+set.seed(1001) 
+ctrl<-trainControl(method="repeatedcv",number=10,classProbs = TRUE,summaryFunction = twoClassSummary) 
+plsda<-train(x=dat.train[,c(2,5,7,8)], # spectral data
+              y=dat.train$Outcome, # factor vector
+              method="pls", # pls-da algorithm
+              tuneLength=10, # number of components
+              trControl=ctrl, # ctrl contained cross-validation option
+              preProc=c("center","scale"), # the data are centered and scaled
+              metric="ROC") # metric is ROC for 2 classes
+
+prediccion <- predict(plsda,dat.test[,c(2,5,7,8)])
+confusionMatrix(prediccion,dat.test$Outcome)
+```
+
+[**COMENTARIO:**]{.underline}
+
+Se seleccionan las columnas 2, 5, 7 y 8 de los datos de entrenamiento como variables predictoras, y la columna "Outcome" como la variable objetivo. Se utiliza "pls" como el algoritmo de PLS-DA y se especifica que se realicen 10 ajustes para seleccionar el número óptimo de componentes utilizando la métrica ROC. Finalmente evalúa el rendimiento del modelo utilizando la matriz de confusión y se obtienen otras estadísticas relacionadas con la clasificación binaria.
+
+La precisión es de 0.7316, lo que indica que el modelo clasificó correctamente el 73.16% de los casos.
+
+La sensibilidad es de 0.8675, lo que indica que el modelo identificó correctamente el 86.75% de los casos de diabetes.
+
+La especificidad es de 0.4750, lo que indica que el modelo identificó correctamente el 47.50% de los casos sin diabetes.
+
+El valor predictivo positivo es de 0.7572, lo que indica que el 75.72% de los casos predichos como diabetes son realmente diabetes.
+
+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+
+Finalmente podríamos hacer un análisis de la varianza multivariante
+
+```{r}
+library(vegan)
+
+adonis2(datos[,-ncol(datos)] ~datos$Outcome,method = "euclidean")
+```
+
+Es decir, como conlusión aunque las variables no pueden detectar la diabetes, siendo variables independientes, si por otro lado las consideramos dependientes de la diabetes.
+
+Es decir, la diabetes es una condición en la que influye en los parámetros, mientras que es menos probable que la diabetes sea la causa de estas alteraciones, con una mejor precisón del 77 por ciento.
+
+Es decir, por un lado tenemos las variables que nos explican solo un 77 porciento de la diabetes, mientras que la condición en sí nos separa más entre la media global.
+
+Se podría investigar más esto. Por ejemplo, se podría hacer una correlación parcial, dada la diabetes, e identificar aquellas variables especificamente relacionadas con esta.

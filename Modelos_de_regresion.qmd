@@ -14,10 +14,10 @@ library(glmnet) ## regresiones logisitcas
 library(caret) ### bayes y knn
 library(e1071) ## bayes
 
-# quitamos la primera columna
+#Quitamos la primera columna
 datos <- read.table("./yeast.data",header = F)[,-1]
 
-# Funciones de transformacion
+#Funciones de transformacion
 min.max.mean <- function(X) apply(X,2,function(x) (x-mean(x))/(max(x)-min(x)))
 min.max.median <- function(X) apply(X,2,function(x) (x-median(x))/(max(x)-min(x)))
 min.max <- function(X) apply(X,2,function(x) (x-min(x))/(max(x)-min(x)))
@@ -25,12 +25,13 @@ zscore <- function(X) apply(X,2,function(x) (x-mean(x))/sd(x))
 l2 <- function(X) apply(X,2,function(x) x/sqrt(sum(x^2))) 
 
 
-#Particion de datosdatos <- as.data.frame(datos)
+#Particion de datos
+datos <- as.data.frame(datos)
 datos.numericos <- datos[, which(unlist(lapply(datos, is.numeric)))]
 clase <- datos$V10 <- as.factor(datos$V10)
 colnames(datos.numericos) <- paste0("Var", rep(1:8))
 
-### procedemos a crear una lista con todas las transformaciones
+#Procedemos a crear una lista con todas las transformaciones
 datos.lista <- list(
   raw = bind_cols(datos.numericos,clase=clase),
   zscore = bind_cols(zscore(datos.numericos),
@@ -47,7 +48,7 @@ datos.lista <- list(
 lista_graficos <- vector("list",length=length(datos.lista))
 datos.melt <- lapply(datos.lista,reshape2::melt)
 
-#graficos
+#Graficos
 for(l in 1:length(datos.melt)){
   
   X <- datos.melt[[l]]
@@ -68,7 +69,7 @@ lista_graficos$plot6
 ```
 
 ```{r}
-#grafico de densidad
+#Grafico de densidad
 for(l in 1:length(datos.melt)){
   
   X <- datos.melt[[l]]
@@ -96,7 +97,7 @@ n  <- nrow(datos)
 idx <- sample(1:n,size=n*0.7,replace=F)
 lambda_seq <- seq(0.01, 1, by = 0.01)
 
-### para conjunto de datos podemos realizar el split
+#Para conjunto de datos podemos realizar el split
 entrenamiento <- lapply(datos.lista, function(x) x[idx,])
 test <- lapply(datos.lista, function(x) x[-idx,])
 
@@ -116,22 +117,6 @@ for(l in 1:length(datos.lista)){
 names(accuracy) <- names(datos.lista)
 accuracy_logis<-accuracy
 
-#Ridge
-set.seed(123456789)
-myfnridge <- function(x) train(clase ~ ., data = x, method = "glmnet", trControl = trControl,tuneGrid = expand.grid(alpha=0,lambda=lambda_seq), trace = F)
-
-logistica.lista <- lapply(entrenamiento,myfnridge)
-logisita.pred <- vector("list",length = length(datos.lista))
-for(l in 1:length( datos.lista)){
-  logisita.pred[[l]] <- predict(logistica.lista[[l]],test[[l]])
-}
-names(logisita.pred) <- names(datos.lista)
-accuracy <- vector("numeric",length = length(datos.lista))
-for(l in 1:length(datos.lista)){
-  accuracy[l] <- confusionMatrix(test$raw$clase,logisita.pred[[l]])$overall[1]
-}
-names(accuracy) <- names(datos.lista)
-accuracy_ridge <- accuracy
 
 #Lasso
 set.seed(123456789)
@@ -151,7 +136,78 @@ names(accuracy) <- names(datos.lista)
 accuracy_lasso <- accuracy
 
 #Knn
+set.seed(123456789)
+myfnknn <- function(x) train(clase ~ ., data = x, method = "knn", trControl = trControl, tuneLength = 20)
+
+logistica.lista <- lapply(entrenamiento,myfnknn)
+logisita.pred <- vector("list",length = length(datos.lista))
+for(l in 1:length( datos.lista)){
+  logisita.pred[[l]] <- predict(logistica.lista[[l]],test[[l]])
+}
+names(logisita.pred) <- names(datos.lista)
+accuracy <- vector("numeric",length = length(datos.lista))
+for(l in 1:length(datos.lista)){
+  accuracy[l] <- confusionMatrix(test$raw$clase,logisita.pred[[l]])$overall[1]
+}
+names(accuracy) <- names(datos.lista)
+accuracy_knn <- accuracy
 
 
 #Naive Bayes
+set.seed(123456789)
+myfnknn <- function(x) train(clase ~ ., data = x, method = "naive_bayes", trControl = trControl, tuneLength = 20)
+
+logistica.lista <- lapply(entrenamiento,myfnknn)
+logisita.pred <- vector("list",length = length(datos.lista))
+for(l in 1:length( datos.lista)){
+  logisita.pred[[l]] <- predict(logistica.lista[[l]],test[[l]])
+}
+names(logisita.pred) <- names(datos.lista)
+accuracy <- vector("numeric",length = length(datos.lista))
+for(l in 1:length(datos.lista)){
+  accuracy[l] <- confusionMatrix(test$raw$clase,logisita.pred[[l]])$overall[1]
+}
+names(accuracy) <- names(datos.lista)
+accuracy_bayes <- accuracy
+
+```
+
+```{r}
+#Matriz Accuracy
+#Crear la matriz de 5x6
+matriz <- matrix(nrow = 5, ncol = 6)
+
+# Asignar los vectores a las filas de la matriz
+matriz[1, ] <- accuracy_logis
+matriz[2, ] <- accuracy_ridge
+matriz[3, ] <- accuracy_lasso
+matriz[4, ] <- accuracy_knn
+matriz[5, ] <- accuracy_bayes
+
+# Asignar nombres a las filas y columnas
+filas <- c("Regresion Logis", "Ridge", "Lassso", "Knn", "Naive Bayes")
+columnas <- c("raw", "zscore", "l2", "media", "mediana", "min_max")
+
+# Asignar nombres a las filas y columnas de la matriz
+rownames(matriz) <- filas
+colnames(matriz) <- columnas
+
+# Imprimir la matriz
+print(matriz)
+
+```
+
+```{r}
+# Encontrar el número máximo y su posición en la matriz
+indice_maximo <- which.max(matriz)
+fila_maximo <- row(matriz)[indice_maximo]
+columna_maximo <- col(matriz)[indice_maximo]
+
+# Obtener el nombre de la fila y columna correspondientes
+nombre_fila <- rownames(matriz)[fila_maximo]
+nombre_columna <- colnames(matriz)[columna_maximo]
+
+# Imprimir el número máximo y su posición
+cat("El mayor porcentaje de los diferentes metodos es", matriz[fila_maximo, columna_maximo], "% ")
+cat("Con el metodo", nombre_fila, "y la transformacion", nombre_columna, "\n")
 ```
